@@ -19,12 +19,12 @@ open Pattern
 open Libnames
 open Vernacexpr
 
-module NamedDecl = Context.Named.Declaration
+(* module NamedDecl = Context.Named.Declaration *)
 
 type filter_function =
-  GlobRef.t -> Decls.logical_kind option -> env -> Evd.evar_map -> constr -> bool
+  GlobRef.t -> (Vernacexpr.discharge * Decls.logical_kind) option -> env -> Evd.evar_map -> constr -> bool
 type display_function =
-  GlobRef.t -> Decls.logical_kind option -> env -> Evd.evar_map -> constr -> unit
+  GlobRef.t -> (Vernacexpr.discharge * Decls.logical_kind) option -> env -> Evd.evar_map -> constr -> unit
 
 (* This option restricts the output of [SearchPattern ...], etc.
 to the names of the symbols matching the
@@ -35,7 +35,7 @@ without having to parse through the types of all symbols. *)
 type glob_search_item =
   | GlobSearchSubPattern of glob_search_where * bool * constr_pattern
   | GlobSearchString of string
-  | GlobSearchKind of Decls.logical_kind
+  | GlobSearchKind of (Vernacexpr.discharge * Decls.logical_kind)
   | GlobSearchFilter of (GlobRef.t -> bool)
 
 type glob_search_request =
@@ -76,19 +76,28 @@ let handle h (Libobject.Dyn.Dyn (tag, o)) = match DynHandle.find tag h with
 | exception Not_found -> ()
 
 (* General search over declarations *)
-let generic_search env sigma (fn : GlobRef.t -> Decls.logical_kind option -> env -> Evd.evar_map -> constr -> unit) =
-  List.iter (fun d -> fn (GlobRef.VarRef (NamedDecl.get_id d)) None env sigma (NamedDecl.get_type d))
-    (Environ.named_context env);
+let generic_search env sigma (fn : GlobRef.t -> (Vernacexpr.discharge * Decls.logical_kind) option -> env -> Evd.evar_map -> constr -> unit) =
+  (* List.iter (fun d ->
+    let id = NamedDecl.get_id d in
+    let kind = Decls.variable_kind id in
+    fn (GlobRef.VarRef id) (Some (DoDischarge, kind)) env sigma (NamedDecl.get_type d))
+  (Environ.named_context env); *)
   let iter_obj prefix lobj = match lobj with
     | AtomicObject o ->
       let handler =
+        DynHandle.add Declare.Internal.objVariable begin fun id ->
+          let gr = (GlobRef.VarRef id) in
+          let (typ, _) = Typeops.type_of_global_in_context (Global.env ()) gr in
+          let kind = Decls.variable_kind id in
+          fn gr (Some (DoDischarge, kind)) env sigma typ
+          end @@
         DynHandle.add Declare.Internal.Constant.tag begin fun (id,obj) ->
           let kn = KerName.make prefix.obj_mp id in
           let cst = Global.constant_of_delta_kn kn in
           let gr = GlobRef.ConstRef cst in
           let (typ, _) = Typeops.type_of_global_in_context (Global.env ()) gr in
           let kind = Declare.Internal.Constant.kind obj in
-          fn gr (Some kind) env sigma typ
+          fn gr (Some (NoDischarge, kind)) env sigma typ
         end @@
         DynHandle.add DeclareInd.Internal.objInductive begin fun (id,_) ->
           let kn = KerName.make prefix.obj_mp id in
@@ -123,7 +132,7 @@ module ConstrPriority = struct
 
   (* The priority is memoised here. Because of the very localised use
      of this module, it is not worth it making a convenient interface. *)
-  type t = GlobRef.t * Decls.logical_kind option * Environ.env * Evd.evar_map * Constr.t * priority
+  type t = GlobRef.t * (Vernacexpr.discharge * Decls.logical_kind) option * Environ.env * Evd.evar_map * Constr.t * priority
   and priority = int
 
   (** A measure of the size of a term *)
@@ -152,7 +161,7 @@ end
 
 module PriorityQueue = Heap.Functional(ConstrPriority)
 
-let rec iter_priority_queue q fn =
+let rec iter_priority_queue q (fn:display_function) =
   (* Tail-rec! *)
   match PriorityQueue.maximum q with
   | (gref,kind,env,sigma,t,_) ->
@@ -160,7 +169,7 @@ let rec iter_priority_queue q fn =
     iter_priority_queue (PriorityQueue.remove q) fn
   | exception Heap.EmptyHeap -> ()
 
-let prioritize_search seq fn =
+let prioritize_search seq (fn:display_function) =
   let acc = ref PriorityQueue.empty in
   let iter gref kind env sigma t =
     let p = ConstrPriority.priority gref t in
