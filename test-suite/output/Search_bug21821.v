@@ -9,8 +9,8 @@ Search is:Axiom.
 Search is:Parameter. 
   (* Shows "X2: Type" *)
 Search is:Hypothesis.
-  (* Should show "Y: Type", shows "X: Type" *)
+  (* Should show "Y: Type"*)
 Search is:Variable.  
-  (* Should show "Y2: Type", shows "X2: Type" *)
+  (* Should show "Y2: Type"*)
 
 End K.

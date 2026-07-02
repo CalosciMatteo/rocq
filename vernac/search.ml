@@ -19,7 +19,7 @@ open Pattern
 open Libnames
 open Vernacexpr
 
-(* module NamedDecl = Context.Named.Declaration *)
+module NamedDecl = Context.Named.Declaration
 
 type filter_function =
   GlobRef.t -> (Vernacexpr.discharge * Decls.logical_kind) option -> env -> Evd.evar_map -> constr -> bool
@@ -143,20 +143,14 @@ let handle h (Libobject.Dyn.Dyn (tag, o)) = match DynHandle.find tag h with
 
 (* General search over declarations *)
 let generic_search env sigma (fn : GlobRef.t -> (Vernacexpr.discharge * Decls.logical_kind) option -> env -> Evd.evar_map -> constr -> unit) =
-  (* List.iter (fun d ->
+  List.iter (fun d ->
     let id = NamedDecl.get_id d in
-    let kind = Decls.variable_kind id in
-    fn (GlobRef.VarRef id) (Some (DoDischarge, kind)) env sigma (NamedDecl.get_type d))
-  (Environ.named_context env); *)
+    let kind = try Some (DoDischarge, Decls.variable_kind id) with Not_found -> None in
+    fn (GlobRef.VarRef id) kind env sigma (NamedDecl.get_type d))
+  (Environ.named_context env);
   let iter_obj prefix lobj = match lobj with
     | AtomicObject o ->
       let handler =
-        DynHandle.add Declare.Internal.objVariable begin fun id ->
-          let gr = (GlobRef.VarRef id) in
-          let (typ, _) = Typeops.type_of_global_in_context (Global.env ()) gr in
-          let kind = Decls.variable_kind id in
-          fn gr (Some (DoDischarge, kind)) env sigma typ
-          end @@
         DynHandle.add Declare.Internal.Constant.tag begin fun (id,obj) ->
           let kn = KerName.make prefix.obj_mp id in
           let cst = Global.constant_of_delta_kn kn in
